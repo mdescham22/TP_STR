@@ -26,6 +26,7 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define PRIORITY_TSENDIMAGE 21
 
 /*
  * Some remarks:
@@ -123,6 +124,10 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_create(&th_sendImage, "th_sendImage", 0, PRIORITY_TSENDIMAGE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Tasks created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -164,6 +169,10 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::MoveTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+     if (err = rt_task_start(&th_sendImage, (void(*)(void*)) & Tasks::SendImage, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -293,6 +302,27 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             move = msgRcv->GetID();
             rt_mutex_release(&mutex_move);
         }
+        else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) {
+            if (!camera.Open()) {
+                Message * msgErr;
+                msgErr = new Message(MESSAGE_ANSWER_NACK);
+                WriteInQueue(&q_messageToMon, msgErr);
+            }
+        }
+        else if (msgRcv->CompareID(MESSAGE_CAM_CLOSE)) {
+                camera.Close();
+                Message * msgErr;
+                msgErr = new Message(MESSAGE_ANSWER_ACK);
+                WriteInQueue(&q_messageToMon, msgErr);
+            }
+        else if(msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
+            StopPeriodic = true;
+            SearchArena();
+            StopPeriodic = false;
+        }
+       /* else if(msgRcv->CompareID(MESSAGE_CAM_POSITION_COMPUTE_START)) {
+            ComputePosition();
+        }*/
         delete(msgRcv); // mus be deleted manually, no consumer
     }
 }
@@ -304,7 +334,6 @@ void Tasks::OpenComRobot(void *arg) {
     int status;
     int err;
     ////////////
-    int cmpt;
     
 
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
@@ -378,6 +407,7 @@ void Tasks::StartRobotTask(void *arg) {
 void Tasks::MoveTask(void *arg) {
     int rs;
     int cpMove;
+
     
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
@@ -407,7 +437,34 @@ void Tasks::MoveTask(void *arg) {
             rt_mutex_release(&mutex_robot);
         }
         cout << endl << flush;
+        
     }
+}
+
+//////
+
+void Tasks::SendImage(void *arg) {
+            
+    rt_task_set_periodic(NULL, TM_NOW, 100000000);
+    while (1) {
+        rt_task_wait_period(NULL);  
+        
+        if(camera.IsOpen() and !StopPeriodic) {
+            Img * img = new Img(camera.Grab());
+            if (!arena->IsEmpty()) {
+                img.DrawArena(arena);
+                MessageImg *msgImg = new MessageImg(MESSAGE_CAM_IMAGE,img);
+            }
+            else {
+              MessageImg *msgImg = new MessageImg(MESSAGE_CAM_IMAGE, img);  
+            }
+            
+           rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+           monitor.Write(msgImg); // The message is deleted with the Write
+           rt_mutex_release(&mutex_monitor);
+        }
+    }
+    
 }
 
 /**
@@ -435,7 +492,7 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
     if ((err = rt_queue_read(queue, &msg, sizeof ((void*) &msg), TM_INFINITE)) < 0) {
         cout << "Read in queue failed: " << strerror(-err) << endl << flush;
         throw std::runtime_error{"Error in read in queue"};
-    }/** else {
+    }/** else {CLOSE)
         cout << "@msg :" << msg << endl << flush;
     } /**/
 
@@ -445,19 +502,78 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
 void Tasks::CompteurATrois(Message * msgSend) {
     if ((msgSend->GetID()==MESSAGE_ANSWER_NACK) ||(msgSend->GetID()==MESSAGE_ANSWER_ROBOT_ERROR) || (msgSend->GetID()==MESSAGE_ANSWER_COM_ERROR )|| (msgSend->GetID()==MESSAGE_ANSWER_ROBOT_TIMEOUT) || (msgSend->GetID()==MESSAGE_ANSWER_ROBOT_UNKNOWN_COMMAND)) {
         cmpt++;
-        cout << "Le compteur est à " <<cmpt<< endl << flush;
+        //cout << "Le compteur est à " <<cmpt<< endl << flush;
     }
     else {
         cmpt = 0;
-        cout<<"Je suis dans la fonction CompteurATrois"<<endl<<flush;
+        //cout<<"Je suis dans la fonction CompteurATrois"<<endl<<flush;
     }
     if (cmpt > 3)
     {
-        
-        WriteInQueue(&q_messageToMon, msgSend);
+        Message * msgErr;
+        msgErr = new Message(MESSAGE_ANSWER_COM_ERROR);
+        WriteInQueue(&q_messageToMon, msgErr);
+        rt_mutex_acquire(&mutex_move, TM_INFINITE);
+        move = MESSAGE_ROBOT_STOP;
+        rt_mutex_release(&mutex_move);
         robot.Close();
+        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
         robotStarted = 0;
+        rt_mutex_release(&mutex_robotStarted);
+        rt_sem_v(&sem_openComRobot);
+    }
+    
+}
+
+Arena * Tasks::SearchArena(void *arg) {
+    Message *msg;
+    Img * img = new Img(camera.Grab());
+    Arena * arena = new Arena;
+    arena= img.SearchArena();
+    
+    if (arena.IsEmpty()) {
+        Message * msgErr;
+        msgErr = new Message(MESSAGE_ANSWER_NACK);
+        WriteInQueue(&q_messageToMon, msgErr);
+    }
+    else {
+        img.DrawArena(arena);
+        MessageImg *msgImg = new MessageImg(MESSAGE_CAM_IMAGE, img);
+        rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+        monitor.Write(msgImg); // The message is deleted with the Write
+        rt_mutex_release(&mutex_monitor);
+        msgRcv = monitor.Read();
+        cout << "Rcv <= " << msgRcv->ToString() << endl << flush;
+        if (msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM)) {
+        }
+        else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
+            delete(arena);
+        }
+        return arena;
         
     }
     
 }
+
+/*void Tasks::ComputePosition(void *arg) {
+            
+    rt_task_set_periodic(NULL, TM_NOW, 100000000);
+    MessagePosition * msgPos;
+    while (1) {
+        rt_task_wait_period(NULL);  
+        Message *msg;
+        Img * img = new Img(camera.Grab());
+        lposition = img.SearchRobot(arena);
+        if(lposition) {
+            img.DrawRobot(lposition);
+            msgPos = new Message(MESSAGE_CAM_POSITION, lposition);
+            monitor.Write(msgPos);
+        }
+        else {
+            msgPos = new Message(MESSAGE_CAM_POSITION, null);
+            monitor.Write(msgPos);
+        }
+        MessageImg *msgImg = new MessageImg(MESSAGE_CAM_IMAGE, img);
+        monitor.Write(msgImg);
+    }
+}*/
