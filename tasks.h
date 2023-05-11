@@ -68,6 +68,9 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     int cmpt = 0;
+    bool StopPeriodic = false;
+    Arena * arena = new Arena;
+    std::list<Position> lposition;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -78,6 +81,7 @@ private:
     RT_TASK th_openComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
+    RT_TASK th_sendImage;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -134,6 +138,7 @@ private:
      */
     void MoveTask(void *arg);
     
+    
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
@@ -152,9 +157,15 @@ private:
     Message *ReadInQueue(RT_QUEUE *queue);
     
     /////////////////
+    void SendImage(void *arg);
+    
     void CompteurATrois(Message * msgSend);
+    
+    void SearchArena(void *arg);
+    
+    void Tasks::ComputePosition(void *arg);
     /////////////////
+    
 };
 
 #endif // __TASKS_H__ 
-
