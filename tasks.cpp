@@ -28,7 +28,7 @@
 #define PRIORITY_TCAMERA 21
 #define PRIORITY_TCHECKBATTERY 10
 #define PRIORITY_TSTARTROBOTWITHWD 20
-#define PRIORITY_TRELOADWD 20
+#define PRIORITY_TRELOADWD 28
 /*
  * Some remarks:
  * 1- This program is mostly a template. It shows you how to create tasks, semaphore
@@ -509,7 +509,7 @@ void Tasks::StartRobotTaskwithWD(void *arg) {
         cout << "Start robot with watchdog (";
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
         msgSend = robot.Write(robot.StartWithWD());
-        rt_mutex_release(&mutex_robot);
+        
         cout << msgSend->GetID();
         cout << ")" << endl;
 
@@ -522,16 +522,13 @@ void Tasks::StartRobotTaskwithWD(void *arg) {
             rt_mutex_release(&mutex_robotStarted);
         }
         WriteInQueue(&q_messageToMon, msgSend); 
+        rt_mutex_release(&mutex_robot);
     }
 }
 
 void Tasks::reloadWD(void * arg){
     int rs;
-    //MessageBattery *msgSend;
     Message * msg; 
-    //msg = (MessageBattery*)robot.Write(new Message(MESSAGE_ROBOT_BATTERY_GET));
-    //Send the message, for example: monitor.send(msg);
-    //or WriteInQueue(&q_messageToMon, msg);
     
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
@@ -540,7 +537,7 @@ void Tasks::reloadWD(void * arg){
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
-    rt_task_set_periodic(NULL, TM_NOW, 50000000);
+    rt_task_set_periodic(NULL, TM_NOW, 1000000000);
 
     while (1) {
         rt_task_wait_period(NULL);
@@ -552,14 +549,9 @@ void Tasks::reloadWD(void * arg){
         if (rs == 1) {
             cout << endl << "reload ";
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            //msgSend = robot.Write(robot.GetBattery());
-            //msg = (Message*)robot.Write(new Message(MESSAGE_ROBOT_RELOAD_WD));
-            robot.Write(robot.ReloadWD());
-            //monitor.Write(msgSend);
-          
-            rt_mutex_release(&mutex_robot);
-            //cout << msg << endl; 
+            msg=robot.Write(robot.ReloadWD());
             WriteInQueue(&q_messageToMon, msg);
+            rt_mutex_release(&mutex_robot);
         }
         
         else {
