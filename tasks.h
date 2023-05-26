@@ -69,8 +69,11 @@ private:
     int move = MESSAGE_ROBOT_STOP;
     int cmpt = 0;
     bool StopPeriodic = false;
-    Arena * arena = new Arena;
+    Arena  arena;
+    bool ArenaConfirm;
+    bool AskPosition = false;
     std::list<Position> lposition;
+    Img * img;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -81,8 +84,11 @@ private:
     RT_TASK th_openComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
+    RT_TASK th_checkBattery;
+    RT_TASK th_startRobotwithWD;
+    RT_TASK th_reloadWD;
     RT_TASK th_sendImage;
-    
+    RT_TASK th_searchArena;
     /**********************************************************************/
     /* Mutex                                                              */
     /**********************************************************************/
@@ -90,6 +96,9 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
+    RT_MUTEX mutex_cam;
+    RT_MUTEX mutex_img;
+    RT_MUTEX mutex_pos;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -98,6 +107,11 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
+    ///////////////////////////::
+    ////////////////////////////
+    RT_SEM sem_startRobotwithWD;
+    RT_SEM sem_searchArena;
+    RT_SEM sem_arenaConfirm;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -138,7 +152,6 @@ private:
      */
     void MoveTask(void *arg);
     
-    
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
@@ -156,16 +169,18 @@ private:
      */
     Message *ReadInQueue(RT_QUEUE *queue);
     
-    /////////////////
+    ////////////////////////////////////////////////////////////////
+    void CheckBatteryTask(void * arg);
+    void StartRobotTaskwithWD(void *arg);
+    void reloadWD(void *arg);
+    
     void SendImage(void *arg);
     
     void CompteurATrois(Message * msgSend);
     
     void SearchArena(void *arg);
     
-    void Tasks::ComputePosition(void *arg);
-    /////////////////
-    
 };
 
 #endif // __TASKS_H__ 
+
